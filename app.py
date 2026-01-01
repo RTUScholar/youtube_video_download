@@ -52,62 +52,51 @@ def progress_hook(d, download_id):
             if percent_str and '%' in percent_str:
                 percent_str = percent_str.replace('%', '').strip() + '%'
             
-            # Get filename to detect if it's video or audio
-            filename = d.get('filename', '')
-            
-            # Initialize if not exists
-            if download_id not in download_progress:
-                download_progress[download_id] = {
-                    'video_progress': 0,
-                    'audio_progress': 0,
-                    'phase': 'video'
-                }
-            
             # Parse percentage
             try:
                 percent_num = float(percent_str.replace('%', ''))
             except:
                 percent_num = 0
             
-            # Determine phase based on filename or progress pattern
-            current_data = download_progress.get(download_id, {})
+            # Initialize if not exists
+            if download_id not in download_progress:
+                download_progress[download_id] = {
+                    'phase': 'video',
+                    'last_percent': 0
+                }
             
-            # If we see progress drop significantly, we're on audio now
-            if current_data.get('phase') == 'video' and percent_num < 50 and current_data.get('video_progress', 0) > 90:
+            current_data = download_progress[download_id]
+            
+            # Detect phase change: if progress drops significantly, we're downloading audio now
+            if current_data.get('last_percent', 0) > 90 and percent_num < 50:
                 download_progress[download_id]['phase'] = 'audio'
-                download_progress[download_id]['video_progress'] = 100
             
-            # Update phase progress
-            if download_progress[download_id]['phase'] == 'video':
-                download_progress[download_id]['video_progress'] = percent_num
-                # Video is 80% of total download
-                overall_percent = (percent_num * 0.8)
-            else:
-                download_progress[download_id]['audio_progress'] = percent_num
-                # Audio is 20% of total, starting from 80%
-                overall_percent = 80 + (percent_num * 0.2)
-            
+            # Store current phase and raw progress
             download_progress[download_id].update({
                 'status': 'downloading',
-                'percent': f'{overall_percent:.1f}%',
+                'percent': percent_str,
+                'raw_percent': percent_num,
                 'speed': speed_str,
                 'eta': eta_str,
+                'phase': current_data.get('phase', 'video'),
+                'last_percent': percent_num,
                 'downloaded': d.get('downloaded_bytes', 0),
                 'total': d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
             })
         except Exception as e:
+            print(f"Progress hook error: {e}")
             pass
     elif d['status'] == 'finished':
         # Mark current phase as complete
         if download_id in download_progress:
-            if download_progress[download_id].get('phase') == 'video':
+            current_phase = download_progress[download_id].get('phase', 'video')
+            if current_phase == 'video':
                 download_progress[download_id]['phase'] = 'audio'
-                download_progress[download_id]['video_progress'] = 100
             else:
-                download_progress[download_id]['audio_progress'] = 100
+                download_progress[download_id]['phase'] = 'merging'
         
         download_progress[download_id].update({
-            'status': 'processing',
+            'status': 'processing' if download_progress[download_id].get('phase') == 'merging' else 'downloading',
             'percent': '100%',
             'speed': 'Merging files...',
             'eta': 'Almost done!'
