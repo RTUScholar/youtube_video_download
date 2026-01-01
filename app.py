@@ -141,6 +141,7 @@ def get_video_info():
     try:
         data = request.json
         url = data.get('url')
+        cookie_id = data.get('cookie_id')
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
@@ -160,6 +161,12 @@ def get_video_info():
                 'X-Youtube-Client-Version': '19.29.1',
             },
         }
+
+        if cookie_id:
+            meta = cookie_files.get(cookie_id)
+            cookie_path = meta.get('path') if meta else None
+            if cookie_path and os.path.exists(cookie_path):
+                ydl_opts['cookiefile'] = cookie_path
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -192,7 +199,13 @@ def get_video_info():
             })
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        raw_err = str(e)
+        if _is_youtube_bot_error(raw_err):
+            raw_err = (
+                "YouTube blocked this request (\"Sign in to confirm you're not a bot\"). "
+                "Upload cookies.txt (optional) and try again."
+            )
+        return jsonify({'error': raw_err}), 400
 
 
 @app.route('/api/cookies', methods=['POST'])

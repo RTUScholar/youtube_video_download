@@ -523,6 +523,11 @@
                 return null;
             }
 
+            // Reuse cookie upload within the same page session
+            if (uploadedCookieId) {
+                return uploadedCookieId;
+            }
+
             const file = input.files[0];
             const form = new FormData();
             form.append('cookies', file);
@@ -542,7 +547,8 @@
             }
 
             const j = await resp.json();
-            return j.cookie_id;
+            uploadedCookieId = j.cookie_id;
+            return uploadedCookieId;
         }
 
         function showNotification(message, type = 'info') {
@@ -570,12 +576,13 @@
 
         async function fetchVideoInfo(url) {
             try {
+                const cookieIdForInfo = await uploadCookiesIfProvided();
                 const response = await fetch('/api/video-info', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ url })
+                    body: JSON.stringify({ url, cookie_id: cookieIdForInfo })
                 });
 
                 if (!response.ok) {
@@ -605,6 +612,14 @@
             } catch (error) {
                 showNotification('Error loading video info', 'error');
             }
+        }
+
+        // If user changes cookies file, force re-upload next time
+        const cookiesInput = document.getElementById('cookiesFile');
+        if (cookiesInput) {
+            cookiesInput.addEventListener('change', () => {
+                uploadedCookieId = null;
+            });
         }
 
         // Auto-fetch video info when URL is pasted
