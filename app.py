@@ -175,7 +175,7 @@ def download_video():
             'eta': 'N/A'
         }
         
-        # Configure yt-dlp options for high quality and speed
+        # Configure yt-dlp options for high quality and speed with bot detection bypass
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f'{download_id}.%(ext)s'),
@@ -188,6 +188,16 @@ def download_video():
             'fragment_retries': 15,
             'http_chunk_size': 20971520,  # 20MB chunks
             'buffersize': 65536,  # 64KB buffer
+            # Bypass bot detection
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
+            'cookiesfrombrowser': ('chrome',),  # Auto-extract cookies from Chrome
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-us,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
             'throttledratelimit': None,  # No rate limiting
             'noprogress': False,  # Enable progress output
         }
@@ -199,15 +209,33 @@ def download_video():
         
         def download_thread():
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(info)
+                # Try with cookies first
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        filename = ydl.prepare_filename(info)
+                        
+                        download_progress[download_id] = {
+                            'status': 'completed',
+                            'filename': os.path.basename(filename),
+                            'filepath': filename
+                        }
+                except Exception as cookie_error:
+                    # If cookie extraction fails, retry without cookies
+                    print(f"Cookie extraction failed, retrying without cookies: {cookie_error}")
+                    ydl_opts_no_cookies = ydl_opts.copy()
+                    if 'cookiesfrombrowser' in ydl_opts_no_cookies:
+                        del ydl_opts_no_cookies['cookiesfrombrowser']
                     
-                    download_progress[download_id] = {
-                        'status': 'completed',
-                        'filename': os.path.basename(filename),
-                        'filepath': filename
-                    }
+                    with yt_dlp.YoutubeDL(ydl_opts_no_cookies) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        filename = ydl.prepare_filename(info)
+                        
+                        download_progress[download_id] = {
+                            'status': 'completed',
+                            'filename': os.path.basename(filename),
+                            'filepath': filename
+                        }
             except Exception as e:
                 download_progress[download_id] = {
                     'status': 'error',
