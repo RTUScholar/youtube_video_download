@@ -117,19 +117,22 @@ def get_video_info():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
+        # Advanced bot bypass configuration
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'user_agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
-            'extractor_args': {'youtube': {
-                'player_client': ['ios', 'android'],
-                'player_skip': ['webpage'],
-            }},
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb'],
+                    'player_skip': ['webpage', 'configs'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
             'http_headers': {
-                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
-                'X-Youtube-Client-Name': '5',
-                'X-Youtube-Client-Version': '19.29.1',
+                'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
             },
         }
         
@@ -185,7 +188,7 @@ def download_video():
             'eta': 'N/A'
         }
         
-        # Configure yt-dlp options for high quality and speed with bot detection bypass
+        # Configure yt-dlp with advanced bot detection bypass
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f'{download_id}.%(ext)s'),
@@ -193,29 +196,27 @@ def download_video():
             'quiet': False,
             'no_warnings': False,
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            'concurrent_fragment_downloads': 16,  # Maximum speed
+            'concurrent_fragment_downloads': 16,
             'retries': 15,
             'fragment_retries': 15,
-            'http_chunk_size': 20971520,  # 20MB chunks
-            'buffersize': 65536,  # 64KB buffer
-            # Bypass bot detection with multiple strategies
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'extractor_args': {'youtube': {
-                'player_client': ['ios', 'android', 'web'],
-                'player_skip': ['webpage', 'configs'],
-                'skip': ['dash', 'hls']
-            }},
+            'http_chunk_size': 20971520,
+            'buffersize': 65536,
+            # Comprehensive bot bypass strategies
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb'],
+                    'player_skip': ['webpage', 'configs'],
+                    'skip': ['dash', 'hls'],
+                }
+            },
             'http_headers': {
-                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
                 'Accept': '*/*',
                 'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate',
-                'X-Youtube-Client-Name': '5',
-                'X-Youtube-Client-Version': '19.29.1',
             },
             'format_sort': ['res', 'ext:mp4:m4a'],
-            'throttledratelimit': None,  # No rate limiting
-            'noprogress': False,  # Enable progress output
+            'throttledratelimit': None,
+            'noprogress': False,
         }
         
         # Adjust format based on quality selection
