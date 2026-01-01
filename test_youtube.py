@@ -6,25 +6,22 @@ import yt_dlp
 # Test URL
 url = "https://www.youtube.com/watch?v=I6ps_05Wsf0"
 
-# Configuration with bot bypass
+# Configuration with Android client only (most reliable)
 ydl_opts = {
     'quiet': False,
     'no_warnings': False,
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'ios', 'mweb'],
+            'player_client': ['android'],
             'player_skip': ['webpage', 'configs'],
-            'skip': ['dash', 'hls'],
         }
     },
     'http_headers': {
         'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
     },
 }
 
-print("Testing YouTube download with bot bypass...")
+print("Testing YouTube download with Android client...")
 print(f"URL: {url}\n")
 
 try:
@@ -45,6 +42,11 @@ try:
                 qualities.add(f"{f.get('height')}p")
         
         print(f"Qualities available: {sorted(qualities, key=lambda x: int(x.replace('p', '')), reverse=True)}")
+        
+        # Check if format 18 is available (360p with audio, most reliable)
+        format_18 = next((f for f in info.get('formats', []) if f.get('format_id') == '18'), None)
+        if format_18:
+            print(f"\n✅ Format 18 (360p combined) available: {format_18.get('ext')}")
         
 except Exception as e:
     print(f"\n❌ ERROR: {str(e)}")

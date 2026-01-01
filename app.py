@@ -117,50 +117,86 @@ def get_video_info():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Advanced bot bypass configuration
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': False,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios', 'mweb'],
-                    'player_skip': ['webpage', 'configs'],
-                    'skip': ['dash', 'hls'],
-                }
+        # Use multiple fallback strategies
+        strategies = [
+            # Strategy 1: Android client (most reliable)
+            {
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android'],
+                        'player_skip': ['webpage', 'configs'],
+                    }
+                },
+                'http_headers': {
+                    'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
+                },
             },
-            'http_headers': {
-                'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
+            # Strategy 2: iOS client
+            {
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['ios'],
+                        'player_skip': ['webpage'],
+                    }
+                },
+                'http_headers': {
+                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                },
             },
-        }
+            # Strategy 3: Mobile web
+            {
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['mweb'],
+                    }
+                },
+            },
+        ]
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            # Get available formats
-            formats = []
-            seen_qualities = set()
-            
-            for f in info.get('formats', []):
-                if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
-                    height = f.get('height')
-                    if height and height not in seen_qualities:
-                        quality = f"{height}p"
-                        formats.append({
-                            'quality': quality,
-                            'format_id': f.get('format_id'),
-                            'ext': f.get('ext', 'mp4'),
-                            'filesize': f.get('filesize', 0)
-                        })
-                        seen_qualities.add(height)
-            
-            # Sort by quality descending
-            formats.sort(key=lambda x: int(x['quality'].replace('p', '')), reverse=True)
-            
-            return jsonify({
-                'title': info.get('title', 'Unknown'),
+        last_error = None
+        for strategy in strategies:
+            try:
+                with yt_dlp.YoutubeDL(strategy) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    
+                    # Successfully got info, process it
+                    formats = []
+                    seen_qualities = set()
+                    
+                    for f in info.get('formats', []):
+                        if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                            height = f.get('height')
+                            if height and height not in seen_qualities:
+                                quality = f"{height}p"
+                                formats.append({
+                                    'quality': quality,
+                                    'format_id': f.get('format_id'),
+                                    'ext': f.get('ext', 'mp4'),
+                                    'filesize': f.get('filesize', 0)
+                                })
+                                seen_qualities.add(height)
+                    
+                    formats.sort(key=lambda x: int(x['quality'].replace('p', '')), reverse=True)
+                    
+                    return jsonify({
+                        'title': info.get('title', 'Unknown'),
+                        'thumbnail': info.get('thumbnail', ''),
+                        'duration': info.get('duration', 0),
+                        'view_count': info.get('view_count', 0),
+                        'formats': formats
+                    })
+            except Exception as e:
+                last_error = str(e)
+                continue
+        
+        # All strategies failed
+        return jsonify({'error': f'Could not fetch video info: {last_error}'}), 400
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail', ''),
                 'formats': formats[:10]  # Return top 10 qualities
@@ -188,31 +224,29 @@ def download_video():
             'eta': 'N/A'
         }
         
-        # Configure yt-dlp with advanced bot detection bypass
+        # Advanced download configuration with multiple fallback strategies
+        # Try format 18 first (360p with audio), which is most reliable and doesn't require merging
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': '18/best[height<=720]/(bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best)',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f'{download_id}.%(ext)s'),
             'merge_output_format': 'mp4',
             'quiet': False,
             'no_warnings': False,
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
             'concurrent_fragment_downloads': 16,
-            'retries': 15,
-            'fragment_retries': 15,
+            'retries': 20,
+            'fragment_retries': 20,
             'http_chunk_size': 20971520,
             'buffersize': 65536,
-            # Comprehensive bot bypass strategies
+            # Use Android client exclusively for downloads (most reliable)
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'mweb'],
+                    'player_client': ['android'],
                     'player_skip': ['webpage', 'configs'],
-                    'skip': ['dash', 'hls'],
                 }
             },
             'http_headers': {
                 'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
             },
             'format_sort': ['res', 'ext:mp4:m4a'],
             'throttledratelimit': None,
