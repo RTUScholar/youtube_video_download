@@ -597,7 +597,7 @@
                 showNotification('Download started! 🚀', 'success');
                 document.getElementById('progressContainer').classList.add('show');
 
-                // Start polling for progress
+                // Start polling for progress (faster refresh)
                 pollProgress();
 
             } catch (error) {
@@ -702,7 +702,7 @@
                     showNotification('Error checking progress', 'error');
                     resetUI();
                 }
-            }, 500); // Update every 500ms for smoother real-time updates
+            }, 250); // Ultra-fast updates - 4x per second
         }
 
         function resetUI() {

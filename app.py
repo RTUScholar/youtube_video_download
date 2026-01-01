@@ -183,11 +183,11 @@ def download_video():
             'quiet': False,
             'no_warnings': False,
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            'concurrent_fragment_downloads': 8,  # Increased for faster downloads
-            'retries': 10,
-            'fragment_retries': 10,
-            'http_chunk_size': 10485760,  # 10MB chunks
-            'buffersize': 16384,  # Optimized buffer size
+            'concurrent_fragment_downloads': 16,  # Maximum speed
+            'retries': 15,
+            'fragment_retries': 15,
+            'http_chunk_size': 20971520,  # 20MB chunks
+            'buffersize': 65536,  # 64KB buffer
             'throttledratelimit': None,  # No rate limiting
             'noprogress': False,  # Enable progress output
         }
@@ -253,9 +253,21 @@ def get_file(download_id):
         return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("🚀 YouTube Video Downloader Server Started!")
-    print("="*60)
-    print(f"📱 Open your browser and go to: http://localhost:5000")
-    print("="*60 + "\n")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)
+    # Configure port for Heroku deployment
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('DEBUG', 'False') == 'True'
+    
+    if not debug_mode:
+        print("\n" + "="*60)
+        print("🚀 YouTube Video Downloader Server Started!")
+        print("="*60)
+        print(f"📱 Server running on port {port}")
+        print("="*60 + "\n")
+    else:
+        print("\n" + "="*60)
+        print("🚀 YouTube Video Downloader Server Started!")
+        print("="*60)
+        print(f"📱 Open your browser and go to: http://localhost:{port}")
+        print("="*60 + "\n")
+    
+    app.run(debug=debug_mode, host='0.0.0.0', port=port, threaded=True)
