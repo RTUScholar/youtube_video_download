@@ -760,13 +760,34 @@
                         }, 3000);
                     } else if (data.status === 'error') {
                         clearInterval(progressInterval);
-                        showNotification('Download error: ' + data.error, 'error');
-                        resetUI();
+                        const errMsg = (data.error || '').toString();
+                        const phaseEl = document.getElementById('downloadPhase');
+                        const progressFill = document.getElementById('progressFill');
+                        const downloadBtn = document.getElementById('downloadBtn');
+
+                        if (errMsg.toLowerCase().includes('cookies.txt') || errMsg.toLowerCase().includes("not a bot") || errMsg.toLowerCase().includes('youtube blocked')) {
+                            phaseEl.innerHTML = '<span class="phase-icon">🔒</span><span class="phase-text">Blocked by YouTube. Upload cookies.txt (optional) and retry.</span><span class="phase-badge">Action needed</span>';
+                            phaseEl.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+                            progressFill.style.width = '0%';
+                            progressFill.textContent = 'Blocked';
+                        }
+
+                        showNotification('Download error: ' + errMsg, 'error');
+
+                        // Allow retry without hiding the whole progress UI
+                        downloadBtn.disabled = false;
+                        downloadBtn.innerHTML = '<span>📥 Download Video</span>';
+                        downloadBtn.style.opacity = '1';
+                        currentDownloadId = null;
                     }
                 } catch (error) {
                     clearInterval(progressInterval);
                     showNotification('Error checking progress', 'error');
-                    resetUI();
+                    const downloadBtn = document.getElementById('downloadBtn');
+                    downloadBtn.disabled = false;
+                    downloadBtn.innerHTML = '<span>📥 Download Video</span>';
+                    downloadBtn.style.opacity = '1';
+                    currentDownloadId = null;
                 }
             }, 250); // Ultra-fast updates - 4x per second
         }
