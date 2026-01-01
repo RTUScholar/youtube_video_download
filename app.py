@@ -6,6 +6,7 @@ import uuid
 import threading
 import time
 import re
+import tempfile
 from pathlib import Path
 
 app = Flask(__name__)
@@ -24,6 +25,22 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Store download progress
 download_progress = {}
 
+# Store uploaded cookie files (cookie_id -> {path, created_at})
+cookie_files = {}
+
+
+def _is_youtube_bot_error(message: str) -> bool:
+    if not message:
+        return False
+    msg = message.lower()
+    return (
+        "sign in to confirm you’re not a bot" in msg
+        or "sign in to confirm you're not a bot" in msg
+        or "use --cookies" in msg
+        or "cookies-from-browser" in msg
+        or "this helps protect our community" in msg
+    )
+
 def cleanup_old_files():
     """Clean up files older than 1 hour"""
     while True:
@@ -35,6 +52,17 @@ def cleanup_old_files():
                     file.unlink()
                 except:
                     pass
+
+        # Cleanup cookies older than 30 minutes
+        for cookie_id, meta in list(cookie_files.items()):
+            try:
+                if current_time - meta.get('created_at', current_time) > 1800:
+                    cookie_path = meta.get('path')
+                    if cookie_path and os.path.exists(cookie_path):
+                        os.remove(cookie_path)
+                    cookie_files.pop(cookie_id, None)
+            except:
+                pass
 
 # Start cleanup thread
 threading.Thread(target=cleanup_old_files, daemon=True).start()
@@ -117,91 +145,86 @@ def get_video_info():
         if not url:
             return jsonify({'error': 'URL is required'}), 400
         
-        # Use multiple fallback strategies
-        strategies = [
-            # Strategy 1: Android client (most reliable)
-            {
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android'],
-                        'player_skip': ['webpage', 'configs'],
-                    }
-                },
-                'http_headers': {
-                    'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
-                },
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'user_agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+            'extractor_args': {'youtube': {
+                'player_client': ['ios', 'android'],
+                'player_skip': ['webpage'],
+            }},
+            'http_headers': {
+                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                'X-Youtube-Client-Name': '5',
+                'X-Youtube-Client-Version': '19.29.1',
             },
-            # Strategy 2: iOS client
-            {
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['ios'],
-                        'player_skip': ['webpage'],
-                    }
-                },
-                'http_headers': {
-                    'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
-                },
-            },
-            # Strategy 3: Mobile web
-            {
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['mweb'],
-                    }
-                },
-            },
-        ]
+        }
         
-        last_error = None
-        for strategy in strategies:
-            try:
-                with yt_dlp.YoutubeDL(strategy) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    
-                    # Successfully got info, process it
-                    formats = []
-                    seen_qualities = set()
-                    
-                    for f in info.get('formats', []):
-                        if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
-                            height = f.get('height')
-                            if height and height not in seen_qualities:
-                                quality = f"{height}p"
-                                formats.append({
-                                    'quality': quality,
-                                    'format_id': f.get('format_id'),
-                                    'ext': f.get('ext', 'mp4'),
-                                    'filesize': f.get('filesize', 0)
-                                })
-                                seen_qualities.add(height)
-                    
-                    formats.sort(key=lambda x: int(x['quality'].replace('p', '')), reverse=True)
-                    
-                    return jsonify({
-                        'title': info.get('title', 'Unknown'),
-                        'thumbnail': info.get('thumbnail', ''),
-                        'duration': info.get('duration', 0),
-                        'view_count': info.get('view_count', 0),
-                        'formats': formats
-                    })
-            except Exception as e:
-                last_error = str(e)
-                continue
-        
-        # All strategies failed
-        return jsonify({'error': f'Could not fetch video info: {last_error}'}), 400
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            # Get available formats
+            formats = []
+            seen_qualities = set()
+            
+            for f in info.get('formats', []):
+                if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                    height = f.get('height')
+                    if height and height not in seen_qualities:
+                        quality = f"{height}p"
+                        formats.append({
+                            'quality': quality,
+                            'format_id': f.get('format_id'),
+                            'ext': f.get('ext', 'mp4'),
+                            'filesize': f.get('filesize', 0)
+                        })
+                        seen_qualities.add(height)
+            
+            # Sort by quality descending
+            formats.sort(key=lambda x: int(x['quality'].replace('p', '')), reverse=True)
+            
+            return jsonify({
+                'title': info.get('title', 'Unknown'),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail', ''),
                 'formats': formats[:10]  # Return top 10 qualities
             })
     
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/cookies', methods=['POST'])
+def upload_cookies():
+    """Upload a Netscape cookies.txt file (optional) for bot/age-gated videos."""
+    try:
+        if 'cookies' not in request.files:
+            return jsonify({'error': 'cookies file is required'}), 400
+
+        f = request.files['cookies']
+        if not f or not f.filename:
+            return jsonify({'error': 'cookies file is required'}), 400
+
+        # Basic size guard (512KB)
+        f.stream.seek(0, os.SEEK_END)
+        size = f.stream.tell()
+        f.stream.seek(0)
+        if size > 512 * 1024:
+            return jsonify({'error': 'cookies file too large'}), 400
+
+        cookie_id = str(uuid.uuid4())
+        tmp = tempfile.NamedTemporaryFile(prefix='cookies_', suffix='.txt', delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+        f.save(tmp_path)
+
+        cookie_files[cookie_id] = {
+            'path': tmp_path,
+            'created_at': time.time(),
+        }
+
+        return jsonify({'cookie_id': cookie_id})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
@@ -212,6 +235,7 @@ def download_video():
         data = request.json
         url = data.get('url')
         quality = data.get('quality', 'best')  # Default to best quality
+        cookie_id = data.get('cookie_id')
         
         if not url:
             return jsonify({'error': 'URL is required'}), 400
@@ -224,34 +248,45 @@ def download_video():
             'eta': 'N/A'
         }
         
-        # Advanced download configuration with multiple fallback strategies
-        # Try format 18 first (360p with audio), which is most reliable and doesn't require merging
+        # Configure yt-dlp options for high quality and speed with bot detection bypass
         ydl_opts = {
-            'format': '18/best[height<=720]/(bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best)',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f'{download_id}.%(ext)s'),
             'merge_output_format': 'mp4',
             'quiet': False,
             'no_warnings': False,
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            'concurrent_fragment_downloads': 16,
-            'retries': 20,
-            'fragment_retries': 20,
-            'http_chunk_size': 20971520,
-            'buffersize': 65536,
-            # Use Android client exclusively for downloads (most reliable)
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android'],
-                    'player_skip': ['webpage', 'configs'],
-                }
-            },
+            'concurrent_fragment_downloads': 16,  # Maximum speed
+            'retries': 15,
+            'fragment_retries': 15,
+            'http_chunk_size': 20971520,  # 20MB chunks
+            'buffersize': 65536,  # 64KB buffer
+            # Bypass bot detection with multiple strategies
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'extractor_args': {'youtube': {
+                'player_client': ['ios', 'android', 'web'],
+                'player_skip': ['webpage', 'configs'],
+                'skip': ['dash', 'hls']
+            }},
             'http_headers': {
-                'User-Agent': 'com.google.android.youtube/19.29.37 (Linux; U; Android 14) gzip',
+                'User-Agent': 'com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate',
+                'X-Youtube-Client-Name': '5',
+                'X-Youtube-Client-Version': '19.29.1',
             },
             'format_sort': ['res', 'ext:mp4:m4a'],
-            'throttledratelimit': None,
-            'noprogress': False,
+            'throttledratelimit': None,  # No rate limiting
+            'noprogress': False,  # Enable progress output
         }
+
+        # Attach cookies if provided (recommended when YouTube shows "not a bot" on servers)
+        if cookie_id:
+            meta = cookie_files.get(cookie_id)
+            cookie_path = meta.get('path') if meta else None
+            if cookie_path and os.path.exists(cookie_path):
+                ydl_opts['cookiefile'] = cookie_path
         
         # Adjust format based on quality selection
         if quality != 'best':
@@ -270,10 +305,26 @@ def download_video():
                         'filepath': filename
                     }
             except Exception as e:
+                raw_err = str(e)
+                if _is_youtube_bot_error(raw_err):
+                    raw_err = (
+                        "YouTube blocked this request ("\
+                        "\"Sign in to confirm you're not a bot\"). "
+                        "Fix: export cookies from your browser and upload cookies.txt, then retry."
+                    )
                 download_progress[download_id] = {
                     'status': 'error',
-                    'error': str(e)
+                    'error': raw_err
                 }
+            finally:
+                # Best-effort cleanup of one-time cookies
+                if cookie_id:
+                    meta = cookie_files.pop(cookie_id, None)
+                    try:
+                        if meta and meta.get('path') and os.path.exists(meta['path']):
+                            os.remove(meta['path'])
+                    except:
+                        pass
         
         # Start download in background thread
         thread = threading.Thread(target=download_thread)

@@ -127,6 +127,34 @@
             border-color: #667eea;
         }
 
+        .cookies-row {
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .cookies-label {
+            color: #666;
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        input[type="file"] {
+            border: 2px dashed #e0e0e0;
+            border-radius: 12px;
+            padding: 10px 12px;
+            width: 100%;
+            max-width: 420px;
+            background: #fff;
+        }
+
+        .cookies-hint {
+            color: #888;
+            font-size: 0.85rem;
+        }
+
         .btn {
             padding: 15px 40px;
             border: none;
@@ -443,6 +471,12 @@
             </select>
         </div>
 
+        <div class="cookies-row">
+            <div class="cookies-label">Cookies (optional)</div>
+            <input type="file" id="cookiesFile" accept=".txt" />
+            <div class="cookies-hint">Only needed if you see “Sign in to confirm you’re not a bot”.</div>
+        </div>
+
         <button class="btn btn-primary" id="downloadBtn" onclick="startDownload()">
             <span>📥 Download Video</span>
         </button>
@@ -481,6 +515,35 @@
     <script>
         let currentDownloadId = null;
         let progressInterval = null;
+        let uploadedCookieId = null;
+
+        async function uploadCookiesIfProvided() {
+            const input = document.getElementById('cookiesFile');
+            if (!input || !input.files || input.files.length === 0) {
+                return null;
+            }
+
+            const file = input.files[0];
+            const form = new FormData();
+            form.append('cookies', file);
+
+            const resp = await fetch('/api/cookies', {
+                method: 'POST',
+                body: form
+            });
+
+            if (!resp.ok) {
+                let msg = 'Failed to upload cookies';
+                try {
+                    const j = await resp.json();
+                    if (j && j.error) msg = j.error;
+                } catch {}
+                throw new Error(msg);
+            }
+
+            const j = await resp.json();
+            return j.cookie_id;
+        }
 
         function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
@@ -576,12 +639,15 @@
                 downloadBtn.innerHTML = '<span class="loader"></span><span>Initializing...</span>';
                 downloadBtn.style.opacity = '0.8';
 
+                // Upload cookies (optional)
+                uploadedCookieId = await uploadCookiesIfProvided();
+
                 const response = await fetch('/api/download', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ url, quality })
+                    body: JSON.stringify({ url, quality, cookie_id: uploadedCookieId })
                 });
 
                 if (!response.ok) {
