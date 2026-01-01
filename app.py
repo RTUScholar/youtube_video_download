@@ -28,6 +28,42 @@ download_progress = {}
 # Store uploaded cookie files (cookie_id -> {path, created_at})
 cookie_files = {}
 
+MAX_COOKIE_UPLOAD_BYTES = 2 * 1024 * 1024  # 2MB
+
+
+def _validate_netscape_cookie_file(path: str) -> tuple[bool, str]:
+    """Validate a Netscape cookies.txt file.
+
+    Returns (ok, error_message). The error_message is empty if ok.
+    """
+    try:
+        with open(path, 'rb') as f:
+            sample = f.read(64 * 1024)
+
+        text = sample.decode('utf-8', errors='ignore')
+        lower = text.lower()
+
+        # Quick hint if a user accidentally uploads runtime.txt
+        first_line = (text.splitlines() or [''])[0].strip()
+        if first_line.startswith('python-') and '\n' not in first_line and len(text.splitlines()) <= 3:
+            return False, 'Invalid cookies.txt: this looks like a Python version file (e.g. runtime.txt). Please export browser cookies in Netscape format.'
+
+        if 'netscape http cookie file' in lower:
+            return True, ''
+
+        # Netscape format is tab-separated with 7 fields:
+        # domain, flag, path, secure, expiration, name, value
+        for line in text.splitlines():
+            s = line.strip()
+            if not s or s.startswith('#'):
+                continue
+            if s.count('\t') >= 6:
+                return True, ''
+
+        return False, 'Invalid cookies.txt: file is not in Netscape cookie format. Export YouTube cookies as cookies.txt (Netscape format) and try again.'
+    except Exception:
+        return False, 'Invalid cookies.txt: could not read/validate file.'
+
 
 def _is_youtube_bot_error(message: str) -> bool:
     if not message:
@@ -219,18 +255,30 @@ def upload_cookies():
         if not f or not f.filename:
             return jsonify({'error': 'cookies file is required'}), 400
 
-        # Basic size guard (512KB)
-        f.stream.seek(0, os.SEEK_END)
-        size = f.stream.tell()
-        f.stream.seek(0)
-        if size > 512 * 1024:
-            return jsonify({'error': 'cookies file too large'}), 400
+        # Basic size guard
+        try:
+            f.stream.seek(0, os.SEEK_END)
+            size = f.stream.tell()
+            f.stream.seek(0)
+            if size > MAX_COOKIE_UPLOAD_BYTES:
+                return jsonify({'error': 'cookies file too large'}), 400
+        except Exception:
+            # If stream isn't seekable, proceed and validate after save.
+            pass
 
         cookie_id = str(uuid.uuid4())
         tmp = tempfile.NamedTemporaryFile(prefix='cookies_', suffix='.txt', delete=False)
         tmp_path = tmp.name
         tmp.close()
         f.save(tmp_path)
+
+        ok, err = _validate_netscape_cookie_file(tmp_path)
+        if not ok:
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
+            return jsonify({'error': err}), 400
 
         cookie_files[cookie_id] = {
             'path': tmp_path,
