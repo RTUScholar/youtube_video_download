@@ -8,9 +8,26 @@ import time
 import re
 from pathlib import Path
 from functools import wraps
+import tempfile
 
 app = Flask(__name__)
 CORS(app)
+
+# Setup Cookies from Env Var (Cloud-Native approach)
+COOKIES_FILE = None
+if os.environ.get('COOKIES_CONTENT'):
+    try:
+        # Create a temporary file for cookies
+        tf = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+        tf.write(os.environ.get('COOKIES_CONTENT'))
+        tf.close()
+        COOKIES_FILE = tf.name
+        print(f"Loaded cookies from environment variable to {COOKIES_FILE}")
+    except Exception as e:
+        print(f"Failed to load cookies from env: {e}")
+elif os.path.exists('cookies.txt'):
+    COOKIES_FILE = 'cookies.txt'
+    print("Loaded cookies from cookies.txt")
 
 # Function to strip ANSI escape codes
 def strip_ansi_codes(text):
@@ -135,6 +152,14 @@ def get_video_info():
                 }
             },
         }
+
+        # Add Proxy if configured
+        if os.environ.get('PROXY_URL'):
+            ydl_opts['proxy'] = os.environ.get('PROXY_URL')
+
+        # Add Cookies if configured
+        if COOKIES_FILE:
+            ydl_opts['cookiefile'] = COOKIES_FILE
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -213,6 +238,14 @@ def download_video():
                 }
             },
         }
+
+        # Add Proxy if configured
+        if os.environ.get('PROXY_URL'):
+            ydl_opts['proxy'] = os.environ.get('PROXY_URL')
+
+        # Add Cookies if configured
+        if COOKIES_FILE:
+            ydl_opts['cookiefile'] = COOKIES_FILE
         
         if quality != 'best':
             quality_num = quality.replace('p', '')
