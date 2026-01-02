@@ -7,7 +7,6 @@ import threading
 import time
 import re
 from pathlib import Path
-import asyncio
 from functools import wraps
 
 app = Flask(__name__)
@@ -26,10 +25,6 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 # Store download progress
 download_progress = {}
 
-# Puppeteer browser instance
-_browser = None
-_browser_lock = threading.Lock()
-
 def _is_youtube_bot_error(message: str) -> bool:
     if not message:
         return False
@@ -40,56 +35,6 @@ def _is_youtube_bot_error(message: str) -> bool:
         or "cookies-from-browser" in msg
         or "this helps protect our community" in msg
     )
-
-async def get_browser():
-    """Get or create Puppeteer browser instance"""
-    global _browser
-    if _browser is None:
-        try:
-            from pyppeteer import launch
-            _browser = await launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled',
-                ]
-            )
-            print("✅ Puppeteer browser initialized")
-        except Exception as e:
-            print(f"⚠️ Puppeteer not available: {e}")
-            return None
-    return _browser
-
-async def bypass_with_puppeteer(url: str):
-    """Use Puppeteer to bypass YouTube bot detection"""
-    try:
-        browser = await get_browser()
-        if not browser:
-            return False
-            
-        page = await browser.newPage()
-        
-        # Set realistic headers
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36')
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-        })
-        
-        # Navigate to page
-        await page.goto(url, {'waitUntil': 'networkidle2', 'timeout': 30000})
-        
-        # Wait for video player
-        await asyncio.sleep(3)
-        
-        await page.close()
-        print("✅ Puppeteer bypass successful")
-        return True
-    except Exception as e:
-        print(f"⚠️ Puppeteer bypass failed: {e}")
-        return False
 
 def cleanup_old_files():
     """Clean up files older than 1 hour"""
@@ -181,14 +126,13 @@ def get_video_info():
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'extractor_args': {'youtube': {
-                'player_client': ['ios', 'android', 'web'],
-                'player_skip': ['webpage'],
-            }},
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept-Language': 'en-US,en;q=0.9',
+            # Android Client Emulation to bypass "Sign in" errors
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios'],
+                    'player_skip': ['webpage', 'configs', 'js'],
+                    'include_ssl_certificate': True
+                }
             },
         }
         
@@ -255,25 +199,19 @@ def download_video():
             'quiet': False,
             'no_warnings': False,
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
-            'concurrent_fragment_downloads': 16,
-            'retries': 15,
-            'fragment_retries': 15,
-            'http_chunk_size': 20971520,
-            'buffersize': 65536,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'extractor_args': {'youtube': {
-                'player_client': ['ios', 'android', 'web'],
-                'player_skip': ['webpage', 'configs'],
-            }},
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate',
+            # Robust network options
+            'socket_timeout': 30,
+            'retries': 10,
+            'fragment_retries': 10,
+            'concurrent_fragment_downloads': 5,
+            # Android Client Emulation to bypass "Sign in" errors
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios'],
+                    'player_skip': ['webpage', 'configs', 'js'],
+                    'include_ssl_certificate': True
+                }
             },
-            'format_sort': ['res', 'ext:mp4:m4a'],
-            'throttledratelimit': None,
-            'noprogress': False,
         }
         
         if quality != 'best':
@@ -282,18 +220,6 @@ def download_video():
         
         def download_thread():
             try:
-                # Try Puppeteer bypass first
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    bypass_success = loop.run_until_complete(bypass_with_puppeteer(url))
-                    loop.close()
-                    
-                    if bypass_success:
-                        download_progress[download_id]['status'] = 'Bot detection bypassed, downloading...'
-                except Exception as bypass_err:
-                    print(f"Bypass attempt: {bypass_err}")
-                
                 # Download with yt-dlp
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
