@@ -413,7 +413,16 @@ def _is_youtube_bot_error(message: str) -> bool:
         or "cookies-from-browser" in msg
         or "this helps protect our community" in msg
     )
-
+def _is_expired_cookies_error(message: str) -> bool:
+    """Check if error is due to expired/invalid cookies"""
+    if not message:
+        return False
+    msg = message.lower()
+    return (
+        "cookies are no longer valid" in msg
+        or "have likely been rotated" in msg
+        or "only images are available" in msg
+    )
 def cleanup_old_files():
     """Clean up files older than 1 hour"""
     while True:
@@ -544,12 +553,13 @@ def get_video_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Get available formats
+            # Get available formats - check video streams (will be merged with audio)
             formats = []
             seen_qualities = set()
             
             for f in info.get('formats', []):
-                if f.get('vcodec') != 'none' and f.get('acodec') != 'none':
+                # Look for video streams (with or without audio)
+                if f.get('vcodec') != 'none':
                     height = f.get('height')
                     if height and height not in seen_qualities:
                         quality = f"{height}p"
@@ -649,7 +659,7 @@ def download_video():
         
         # Configure yt-dlp options for high quality and speed with bot detection bypass
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bestvideo+bestaudio/best',
             'outtmpl': os.path.join(DOWNLOAD_DIR, f'{download_id}.%(ext)s'),
             'merge_output_format': 'mp4',
             'quiet': False,
@@ -690,7 +700,7 @@ def download_video():
         # Adjust format based on quality selection
         if quality != 'best':
             quality_num = quality.replace('p', '')
-            ydl_opts['format'] = f'bestvideo[height<={quality_num}][ext=mp4]+bestaudio[ext=m4a]/best[height<={quality_num}][ext=mp4]/best'
+            ydl_opts['format'] = f'bestvideo[height<={quality_num}]+bestaudio/best[height<={quality_num}]/best'
         
         def download_thread():
             try:
@@ -706,7 +716,16 @@ def download_video():
                     }
             except Exception as e:
                 raw_err = str(e)
-                if _is_youtube_bot_error(raw_err):
+                if _is_expired_cookies_error(raw_err):
+                    raw_err = (
+                        "⚠️ Cookie Error: Your cookies have expired. "
+                        "YouTube rotates cookies for security. Please export fresh cookies from your browser:\n"
+                        "1. Install 'Get cookies.txt LOCALLY' browser extension\n"
+                        "2. Visit YouTube while logged in\n"
+                        "3. Export cookies.txt\n"
+                        "4. Upload the new file here"
+                    )
+                elif _is_youtube_bot_error(raw_err):
                     raw_err = (
                         "YouTube blocked this request. "
                         "Solution: Upload cookies.txt from your browser (when logged into YouTube) and try again. "
